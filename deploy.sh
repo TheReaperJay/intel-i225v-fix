@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Deploy script for Intel I225-V PCIe link drop fix
 # Idempotent — safe to run multiple times
+# Handles the NIC being alive OR already dead at install time
 
 set -euo pipefail
 
@@ -11,6 +12,7 @@ SCRIPT_DEST="/usr/local/bin/nic-watchdog.sh"
 SERVICE_DIR="/etc/systemd/system"
 BRIDGE_SERVICE="pcie-bridge-fix.service"
 WATCHDOG_SERVICE="nic-watchdog.service"
+PERSISTENT_CONFIG="/etc/i225v-bridges.conf"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,16 +28,6 @@ check_root() {
         error "This script must be run as root (sudo ./deploy.sh)"
         exit 1
     fi
-}
-
-check_device() {
-    if ! lspci -d "$DEVICE_ID" &>/dev/null; then
-        error "Intel I225-V (${DEVICE_ID}) not found on this system"
-        exit 1
-    fi
-    local rev
-    rev=$(lspci -d "$DEVICE_ID" -vv 2>/dev/null | grep -oP 'rev \K[0-9a-f]+' | head -1)
-    info "Found Intel I225-V (rev ${rev:-unknown}) on PCI bus"
 }
 
 check_existing() {
@@ -69,6 +61,33 @@ install_files() {
     cp "${SCRIPT_DIR}/services/${WATCHDOG_SERVICE}" "${SERVICE_DIR}/${WATCHDOG_SERVICE}"
     chmod 644 "${SERVICE_DIR}/${WATCHDOG_SERVICE}"
     info "Installed ${SERVICE_DIR}/${WATCHDOG_SERVICE}"
+}
+
+# Run the fix script immediately — this handles all 3 scenarios:
+# 1. NIC alive: discovers bridges, locks them, saves config
+# 2. NIC dead + saved config: reads config, rescans, recovers
+# 3. NIC dead + no config: scans empty bridges, rescans, recovers
+apply_fixes_now() {
+    info "Applying PCIe bridge fixes..."
+    if "$SCRIPT_DEST" --apply-fixes; then
+        info "Bridge power management locked down"
+
+        local slot
+        slot=$(lspci -D -d "$DEVICE_ID" 2>/dev/null | awk '{print $1}' | head -1)
+        if [[ -n "$slot" ]]; then
+            local rev
+            rev=$(lspci -d "$DEVICE_ID" -vv 2>/dev/null | grep -oP 'rev \K[0-9a-f]+' | head -1)
+            info "Intel I225-V (rev ${rev:-unknown}) online at ${slot}"
+        fi
+
+        if [[ -f "$PERSISTENT_CONFIG" ]]; then
+            info "Bridge config saved to ${PERSISTENT_CONFIG}"
+        fi
+    else
+        error "Failed to apply bridge fixes"
+        error "The I225-V may not be recoverable without a power cycle"
+        return 1
+    fi
 }
 
 enable_services() {
@@ -126,8 +145,8 @@ echo "================================================"
 echo ""
 
 check_root
-check_device
 check_existing
 install_files
+apply_fixes_now
 enable_services
 verify

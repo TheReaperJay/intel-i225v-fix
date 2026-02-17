@@ -43,6 +43,8 @@ Runs at boot before NetworkManager. Dynamically discovers the I225-V on the PCI 
 
 Also locks down sibling devices behind the shared bridge to ensure no device in the subtree can trigger a power state change.
 
+If the NIC has already dropped off the bus, the service uses a saved bridge configuration from a previous run to lock down known bridges and rescan the PCIe bus to recover the device.
+
 ### 2. Watchdog and Auto-Recovery (`nic-watchdog.service`)
 
 A persistent daemon that monitors kernel messages via `journalctl` for the `PCIe link lost` event. When a drop is detected, it automatically:
@@ -55,6 +57,17 @@ A persistent daemon that monitors kernel messages via `journalctl` for the `PCIe
 
 The watchdog has a 30-second cooldown between recovery attempts to prevent tight loops.
 
+### Recovery Escalation
+
+When the NIC is not on the PCI bus, the script escalates through 4 recovery strategies:
+
+1. **Saved config rescan** — reads the persistent bridge config and rescans from the deepest known bridge
+2. **Empty bridge scan** — finds all PCI bridges with no downstream devices and rescans each one
+3. **Aggressive remove + rescan** — removes the empty bridge and rescans from the root port, forcing full re-enumeration
+4. **Full PCI bus rescan** — last resort, rescans the entire bus
+
+If all 4 strategies fail, the hardware is stuck in a bad power state and requires a full power cycle (not just a reboot).
+
 ## Compatibility
 
 - **Affected hardware**: Intel I225-V rev 01 (PCI ID `8086:15f3`). Later revisions (02, 03) fixed the silicon bug.
@@ -65,18 +78,21 @@ The watchdog has a 30-second cooldown between recovery attempts to prevent tight
 ## Installation
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/TheReaperJay/intel-i225v-fix.git
 cd intel-i225v-fix
 sudo ./deploy.sh
 ```
 
 The deploy script:
-- Verifies the I225-V is present on the system
 - Detects and upgrades any previous installation (idempotent)
+- Applies bridge power fixes immediately (recovering the NIC if needed)
+- Saves the bridge chain to `/etc/i225v-bridges.conf` for future boots
 - Installs the watchdog script to `/usr/local/bin/`
 - Installs both service files to `/etc/systemd/system/`
 - Enables and starts both services
 - Verifies everything is running
+
+**Note:** For the best first-time install experience, run `deploy.sh` while the NIC is still alive. If the NIC has already dropped and the script cannot recover it, a full power cycle (PSU off, wait 10 seconds, power on) may be needed before deploying.
 
 ## Uninstallation
 
