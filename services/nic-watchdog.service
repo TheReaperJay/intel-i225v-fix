@@ -1,0 +1,13 @@
+[Unit]
+Description=Intel I225-V NIC link drop watchdog and auto-recovery
+After=pcie-bridge-fix.service NetworkManager.service
+Wants=pcie-bridge-fix.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nic-watchdog.sh --watchdog
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

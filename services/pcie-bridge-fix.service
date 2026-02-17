@@ -1,0 +1,13 @@
+[Unit]
+Description=Intel I225-V PCIe bridge power management fix
+After=systemd-udev-settle.service
+Before=NetworkManager.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/nic-watchdog.sh --apply-fixes
+
+[Install]
+WantedBy=sysinit.target
