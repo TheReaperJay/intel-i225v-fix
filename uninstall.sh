@@ -92,6 +92,13 @@ remove_files() {
 
     systemctl daemon-reload
     info "Reloaded systemd daemon"
+
+    info "Rebuilding initramfs to remove udev rules..."
+    if dracut -f 2>&1; then
+        info "Initramfs rebuilt successfully"
+    else
+        warn "Failed to rebuild initramfs — old udev rules may persist until next kernel update"
+    fi
 }
 
 restore_power_defaults() {

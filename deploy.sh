@@ -91,6 +91,14 @@ apply_fixes_now() {
         if [[ -f "$UDEV_RULE" ]]; then
             info "udev rules generated at ${UDEV_RULE}"
         fi
+
+        info "Rebuilding initramfs to include udev rules..."
+        if dracut -f 2>&1; then
+            info "Initramfs rebuilt successfully"
+        else
+            error "Failed to rebuild initramfs — udev rules will not be present at early boot"
+            return 1
+        fi
     else
         error "Failed to apply bridge fixes"
         error "The I225-V may not be recoverable without a power cycle"

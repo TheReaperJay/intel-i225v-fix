@@ -1,6 +1,6 @@
 # Intel I225-V (rev 01) PCIe Link Drop Fix
 
-A systemd-based fix for the Intel I225-V Ethernet controller (rev 01) that suffers from random PCIe link drops, causing the NIC to completely detach from the system and become unrecoverable without a reboot.
+A udev + systemd fix for the Intel I225-V Ethernet controller (rev 01) that suffers from random PCIe link drops, causing the NIC to completely detach from the system and become unrecoverable without a reboot.
 
 ## The Problem
 
@@ -43,7 +43,7 @@ The most critical layer. A udev rule that fires the moment each PCIe bridge appe
 
 Without this, the kernel's PCIe PM transitions bridges into D3cold during early boot, and by the time any systemd service can run, the `igc` driver has already tried to probe the NIC and found it electrically dead (`Unable to change power state from D3cold to D0, device inaccessible`).
 
-The udev rule is generated at deploy time from the discovered bridge topology. It contains per-bridge rules matching specific PCI slot addresses, plus a static vendor:device rule for the I225-V itself that works without any saved config.
+The udev rule is generated at deploy time from the discovered bridge topology. It contains per-bridge rules matching specific PCI slot addresses, plus a static vendor:device rule for the I225-V itself that works without any saved config. The rule is baked into the initramfs via `dracut -f` so it is present during early boot — PCI enumeration and driver binding happen in the initramfs stage, before the real root filesystem is mounted, so a rule only on the root filesystem would fire too late.
 
 ### 2. Bridge Power Lockdown Service (`pcie-bridge-fix.service`)
 
@@ -94,6 +94,7 @@ The deploy script:
 - Applies bridge power fixes immediately (recovering the NIC if needed)
 - Saves the bridge chain to `/etc/i225v-bridges.conf` for future boots
 - Generates udev rules at `/etc/udev/rules.d/10-i225v-bridge-pm.rules`
+- Rebuilds the initramfs (`dracut -f`) to include the udev rules at early boot
 - Installs the watchdog script to `/usr/local/bin/`
 - Installs both service files to `/etc/systemd/system/`
 - Enables and starts both services
@@ -107,14 +108,15 @@ The deploy script:
 sudo ./uninstall.sh
 ```
 
-This stops and disables both services, removes all installed files (including udev rules and saved bridge config), and restores default PCIe power management settings.
+This stops and disables both services, removes all installed files (including udev rules and saved bridge config), rebuilds the initramfs to remove the baked-in rules, and restores default PCIe power management settings.
 
 ## Verifying It Works
 
-Check that udev rules are installed:
+Check that udev rules are installed and baked into the initramfs:
 
 ```bash
 cat /etc/udev/rules.d/10-i225v-bridge-pm.rules
+sudo lsinitrd /boot/initramfs-$(uname -r).img | grep i225v
 ```
 
 Check that the bridge fix applied at boot:
