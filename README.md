@@ -32,20 +32,26 @@ All three devices share a common parent bridge — when the bridge enters a bad 
 
 ## The Fix
 
-This project provides two systemd services:
+This project provides a three-layer defense: a udev rule for timing-critical boot protection, a systemd service as a safety net, and a watchdog daemon for runtime recovery.
 
-### 1. Bridge Power Lockdown (`pcie-bridge-fix.service`)
+### 1. udev Rule — Early Boot Bridge Lockdown (`10-i225v-bridge-pm.rules`)
 
-Runs at boot before NetworkManager. Dynamically discovers the I225-V on the PCI bus, walks the sysfs topology to find every parent bridge, and locks them all down:
+The most critical layer. A udev rule that fires the moment each PCIe bridge appears in sysfs — **before** `80-drivers.rules` loads the `igc` module. It uses inline `ATTR{}=` writes (no subprocess) to immediately set:
 
-- `power/control=on` — prevents runtime power management from suspending the bridge
 - `d3cold_allowed=0` — prevents the bridge from entering deep sleep (D3cold)
+- `power/control=on` — prevents runtime power management from suspending the bridge
 
-Also locks down sibling devices behind the shared bridge to ensure no device in the subtree can trigger a power state change.
+Without this, the kernel's PCIe PM transitions bridges into D3cold during early boot, and by the time any systemd service can run, the `igc` driver has already tried to probe the NIC and found it electrically dead (`Unable to change power state from D3cold to D0, device inaccessible`).
+
+The udev rule is generated at deploy time from the discovered bridge topology. It contains per-bridge rules matching specific PCI slot addresses, plus a static vendor:device rule for the I225-V itself that works without any saved config.
+
+### 2. Bridge Power Lockdown Service (`pcie-bridge-fix.service`)
+
+Safety net that runs at boot after udev trigger. Dynamically discovers the I225-V on the PCI bus, walks the sysfs topology to find every parent bridge, and locks them all down. Also locks sibling devices behind the shared bridge and regenerates the udev rules if the PCIe topology has changed (e.g., after a BIOS update).
 
 If the NIC has already dropped off the bus, the service uses a saved bridge configuration from a previous run to lock down known bridges and rescan the PCIe bus to recover the device.
 
-### 2. Watchdog and Auto-Recovery (`nic-watchdog.service`)
+### 3. Watchdog and Auto-Recovery (`nic-watchdog.service`)
 
 A persistent daemon that monitors kernel messages via `journalctl` for the `PCIe link lost` event. When a drop is detected, it automatically:
 
@@ -87,6 +93,7 @@ The deploy script:
 - Detects and upgrades any previous installation (idempotent)
 - Applies bridge power fixes immediately (recovering the NIC if needed)
 - Saves the bridge chain to `/etc/i225v-bridges.conf` for future boots
+- Generates udev rules at `/etc/udev/rules.d/10-i225v-bridge-pm.rules`
 - Installs the watchdog script to `/usr/local/bin/`
 - Installs both service files to `/etc/systemd/system/`
 - Enables and starts both services
@@ -100,9 +107,15 @@ The deploy script:
 sudo ./uninstall.sh
 ```
 
-This stops and disables both services, removes all installed files, and restores default PCIe power management settings.
+This stops and disables both services, removes all installed files (including udev rules and saved bridge config), and restores default PCIe power management settings.
 
 ## Verifying It Works
+
+Check that udev rules are installed:
+
+```bash
+cat /etc/udev/rules.d/10-i225v-bridge-pm.rules
+```
 
 Check that the bridge fix applied at boot:
 
@@ -137,10 +150,16 @@ If you need to manually recover the NIC without rebooting:
 sudo /usr/local/bin/nic-watchdog.sh --recover
 ```
 
-Or to just re-apply the bridge power fixes:
+Re-apply bridge power fixes:
 
 ```bash
 sudo /usr/local/bin/nic-watchdog.sh --apply-fixes
+```
+
+Regenerate udev rules from saved bridge config (e.g., after a BIOS update):
+
+```bash
+sudo /usr/local/bin/nic-watchdog.sh --generate-udev
 ```
 
 ## Project Structure

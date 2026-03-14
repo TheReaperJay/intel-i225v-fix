@@ -8,6 +8,8 @@ SCRIPT_DEST="/usr/local/bin/nic-watchdog.sh"
 SERVICE_DIR="/etc/systemd/system"
 BRIDGE_SERVICE="pcie-bridge-fix.service"
 WATCHDOG_SERVICE="nic-watchdog.service"
+PERSISTENT_CONFIG="/etc/i225v-bridges.conf"
+UDEV_RULE="/etc/udev/rules.d/10-i225v-bridge-pm.rules"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,7 +28,7 @@ check_root() {
 }
 
 check_installed() {
-    if [[ ! -f "$SCRIPT_DEST" && ! -f "${SERVICE_DIR}/${BRIDGE_SERVICE}" && ! -f "${SERVICE_DIR}/${WATCHDOG_SERVICE}" ]]; then
+    if [[ ! -f "$SCRIPT_DEST" && ! -f "${SERVICE_DIR}/${BRIDGE_SERVICE}" && ! -f "${SERVICE_DIR}/${WATCHDOG_SERVICE}" && ! -f "$UDEV_RULE" ]]; then
         warn "Nothing to uninstall — no installation found"
         exit 0
     fi
@@ -72,8 +74,21 @@ remove_files() {
         info "Removed ${SCRIPT_DEST}"
     fi
 
+    if [[ -f "$UDEV_RULE" ]]; then
+        rm "$UDEV_RULE"
+        info "Removed ${UDEV_RULE}"
+    fi
+
+    if [[ -f "$PERSISTENT_CONFIG" ]]; then
+        rm "$PERSISTENT_CONFIG"
+        info "Removed ${PERSISTENT_CONFIG}"
+    fi
+
     # Clean up runtime state
     rm -f /run/i225v-bridge-chain /run/i225v-rescan-bridge
+
+    udevadm control --reload-rules 2>/dev/null || true
+    info "Reloaded udev rules"
 
     systemctl daemon-reload
     info "Reloaded systemd daemon"

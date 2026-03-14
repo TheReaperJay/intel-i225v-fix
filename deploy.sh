@@ -13,6 +13,7 @@ SERVICE_DIR="/etc/systemd/system"
 BRIDGE_SERVICE="pcie-bridge-fix.service"
 WATCHDOG_SERVICE="nic-watchdog.service"
 PERSISTENT_CONFIG="/etc/i225v-bridges.conf"
+UDEV_RULE="/etc/udev/rules.d/10-i225v-bridge-pm.rules"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -39,6 +40,9 @@ check_existing() {
         installed=1
     fi
     if [[ -f "${SERVICE_DIR}/${WATCHDOG_SERVICE}" ]]; then
+        installed=1
+    fi
+    if [[ -f "$UDEV_RULE" ]]; then
         installed=1
     fi
 
@@ -83,6 +87,10 @@ apply_fixes_now() {
         if [[ -f "$PERSISTENT_CONFIG" ]]; then
             info "Bridge config saved to ${PERSISTENT_CONFIG}"
         fi
+
+        if [[ -f "$UDEV_RULE" ]]; then
+            info "udev rules generated at ${UDEV_RULE}"
+        fi
     else
         error "Failed to apply bridge fixes"
         error "The I225-V may not be recoverable without a power cycle"
@@ -126,9 +134,17 @@ verify() {
         ok=1
     fi
 
+    if [[ -f "$UDEV_RULE" ]]; then
+        info "udev rules installed at ${UDEV_RULE}"
+    else
+        error "udev rules not generated — bridges may not be locked at next boot"
+        ok=1
+    fi
+
     if [[ $ok -eq 0 ]]; then
         echo ""
         info "Deployment complete. Bridge power management locked down, watchdog running."
+        info "udev rules will lock bridges before igc probes on next boot."
         info "Check status: journalctl -u nic-watchdog -f"
     else
         echo ""

@@ -1,6 +1,6 @@
 [Unit]
 Description=Intel I225-V PCIe bridge power management fix
-After=systemd-udev-settle.service
+After=systemd-udev-trigger.service
 Before=NetworkManager.service
 DefaultDependencies=no
 
